@@ -1,3 +1,5 @@
+import math
+
 import cv2
 from collections import Counter
 from inflect import engine
@@ -13,7 +15,7 @@ def capture():
         print("Error opening camera")
         exit()
 
-    num_frames = 30
+    num_frames = 10
     captured_frame = None
 
     for i in range(num_frames):
@@ -31,8 +33,10 @@ def capture():
     if captured_frame is not None:
         cv2.imwrite('image.jpg', captured_frame)
         height, width, _ = captured_frame.shape
+        return width
     else:
         print("Failed to capture image")
+        raise SystemError
 
 
 def detect(url):
@@ -49,15 +53,17 @@ def detect(url):
     results = processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.9)[0]
 
     objects = []
+    centers = []
 
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         box = [round(i, 2) for i in box.tolist()]
         objects.append(model.config.id2label[label.item()])
+        centers.append(math.floor((box[0] + box[2]) / 2))
         print(
             f"Detected {model.config.id2label[label.item()]} with confidence "
             f"{round(score.item(), 3)} at location {box}"
         )
-    return objects
+    return [objects, centers]
 
 
 def count_and_format(obj_list):
@@ -69,7 +75,50 @@ def count_and_format(obj_list):
             itemsList.append(p.a(item))
         else:
             itemsList.append(str(count) + " " + p.plural(item))
-    return p.join(itemsList)
+    text = p.join(itemsList)
+    if len(text) > 0:
+        if text[0] != "a":
+            textF = "there are " + text + ". "
+        else:
+            textF = "there is " + text + ". "
+        return textF
+    else:
+        return ""
 
 
-capture()
+print("Starting")
+while True:
+    width = capture()
+
+    objects, centers = detect("image.jpg")
+
+    left = []
+    middle = []
+    right = []
+
+    for i in range(len(objects)):
+        if centers[i] < math.floor(width / 3):
+            left.append(objects[i])
+        elif centers[i] < math.floor(width * 2 / 3):
+            middle.append(objects[i])
+        else:
+            right.append(objects[i])
+
+    leftText = "On the left, "
+    middleText = "In the middle, "
+    rightText = "On the right, "
+
+    leftText += count_and_format(left)
+    middleText += count_and_format(middle)
+    rightText += count_and_format(right)
+
+    finalText = ""
+
+    if leftText != "On the left, ":
+        finalText += leftText
+    if middleText != "In the middle, ":
+        finalText += middleText
+    if rightText != "On the right, ":
+        finalText += rightText
+
+    print(finalText)
