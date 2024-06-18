@@ -1,13 +1,27 @@
+import math
+
 import cv2
 from collections import Counter
 from inflect import engine
-from transformers import DetrImageProcessor, DetrForObjectDetection
+from transformers import DetrImageProcessor, DetrForObjectDetection, FastSpeech2ConformerTokenizer, FastSpeech2ConformerModel, FastSpeech2ConformerHifiGan
+import sounddevice as sd
 from PIL import Image
 import torch
-from transformers import pipeline
-from datasets import load_dataset
-import soundfile as sf
+import numpy as np
+import time
 
+start = time.time()
+
+tokenizer = FastSpeech2ConformerTokenizer.from_pretrained("espnet/fastspeech2_conformer")
+audioModel = FastSpeech2ConformerModel.from_pretrained("espnet/fastspeech2_conformer")
+hifigan = FastSpeech2ConformerHifiGan.from_pretrained("espnet/fastspeech2_conformer_hifigan")
+processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
+objModel = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
+
+end = time.time()
+modelLoadingTime = str(math.floor(end - start))
+
+print("Models took " + modelLoadingTime + " seconds to load")
 
 def capture():
     cap = cv2.VideoCapture(0)
@@ -16,7 +30,7 @@ def capture():
         print("Error opening camera")
         exit()
 
-    num_frames = 30
+    num_frames = 10
     captured_frame = None
 
     for i in range(num_frames):
@@ -34,48 +48,34 @@ def capture():
     if captured_frame is not None:
         cv2.imwrite('image.jpg', captured_frame)
         height, width, _ = captured_frame.shape
-
-        # Calculate section width (assuming integer division for equal sections)
-        section_width = width // 3
-
-        # Split image into sections
-        sections = [captured_frame[:, i * section_width: (i + 1) * section_width] for i in range(3)]
-
-        # Define base filename and extension (modify as needed)
-        base_filename = "section"
-        extension = ".jpg"
-
-        # Save each section to a separate file
-        for i, section in enumerate(sections):
-            filename = f"{base_filename}{i + 1}{extension}"
-            cv2.imwrite(filename, section)
+        return width
     else:
         print("Failed to capture image")
+        raise SystemError
 
 
 def detect(url):
+    start = time.time()
     image = Image.open(url)
 
-    # you can specify the revision tag if you don't want the timm dependency
-    processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
-    model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
-
     inputs = processor(images=image, return_tensors="pt")
-    outputs = model(**inputs)
+    outputs = objModel(**inputs)
 
     target_sizes = torch.tensor([image.size[::-1]])
     results = processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.9)[0]
 
     objects = []
+    centers = []
 
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         box = [round(i, 2) for i in box.tolist()]
-        objects.append(model.config.id2label[label.item()])
-        print(
-            f"Detected {model.config.id2label[label.item()]} with confidence "
-            f"{round(score.item(), 3)} at location {box}"
-        )
-    return objects
+        objects.append(objModel.config.id2label[label.item()])
+        centers.append(math.floor((box[0] + box[2]) / 2))
+
+    end = time.time()
+    speechLoadingTime = str(math.floor(end - start))
+    print("Detection took " + speechLoadingTime + " seconds")
+    return [objects, centers]
 
 
 def count_and_format(obj_list):
@@ -87,74 +87,73 @@ def count_and_format(obj_list):
             itemsList.append(p.a(item))
         else:
             itemsList.append(str(count) + " " + p.plural(item))
-    return p.join(itemsList)
-
-
-print("Done Importing")
-print("Capturing Images")
-capture()
-print("Done Capturing Images")
-
-text = ""
-
-print("Detecting From Image 1")
-objectL = detect("./section1.jpg")
-print(objectL)
-print("Done Detecting From Image 1")
-
-if len(objectL) > 0:
-    print("Formatting")
-    textL = ""
-    textO = count_and_format(objectL)
-    if textO[0] != "a":
-        textL += "On the left, there are " + textO + ". "
+    text = p.join(itemsList)
+    if len(text) > 0:
+        if text[0] != "a":
+            textF = "there are " + text + ". "
+        else:
+            textF = "there is " + text + ". "
+        return textF
     else:
-        textL += "On the left, there is a " + textO + ". "
-    print(textL)
-    text += textL
-    print("Done Formatting")
+        return ""
 
-print("Detecting From Image 2")
-objectM = detect("./section2.jpg")
-print(objectM)
-print("Done Detecting From Image 2")
 
-if len(objectM) > 0:
-    print("Formatting")
-    textM = ""
-    textO = count_and_format(objectM)
-    if textO[0] != "a":
-        textM += "In the middle, there are " + textO + ". "
-    else:
-        textM += "In the middle, there is a " + textO + ". "
-    print(textM)
-    text += textM
-    print("Done Formatting")
+print("Starting")
+while True:
+    try:
+        width = capture()
 
-print("Detecting From Image 3")
-objectR = detect("./section3.jpg")
-print(objectR)
-print("Done Detecting From Image 3")
+        objects, centers = detect("image.jpg")
 
-if len(objectR) > 0:
-    print("Formatting")
-    textR = ""
-    textO = count_and_format(objectR)
-    if textO[0] != "a":
-        textR += "On the right, there are " + textO + ". "
-    else:
-        textR += "On the right, there is " + textO + ". "
-    print(textR)
-    text += textR
-    print("Done Formatting")
+        left = []
+        middle = []
+        right = []
 
-print(text)
+        for i in range(len(objects)):
+            if centers[i] < math.floor(width / 3):
+                left.append(objects[i])
+            elif centers[i] < math.floor(width * 2 / 3):
+                middle.append(objects[i])
+            else:
+                right.append(objects[i])
 
-synthesiser = pipeline("text-to-speech", "microsoft/speecht5_tts")
+        leftText = "On the left, "
+        middleText = "In the middle, "
+        rightText = "On the right, "
 
-embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-speaker_embedding = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0)
+        leftText += count_and_format(left)
+        middleText += count_and_format(middle)
+        rightText += count_and_format(right)
 
-speech = synthesiser(text, forward_params={"speaker_embeddings": speaker_embedding})
+        finalText = ""
 
-sf.write("speech.wav", speech["audio"], samplerate=speech["sampling_rate"])
+        if leftText != "On the left, ":
+            finalText += leftText
+        if middleText != "In the middle, ":
+            finalText += middleText
+        if rightText != "On the right, ":
+            finalText += rightText
+
+        start = time.time()
+
+        inputs = tokenizer(finalText, return_tensors="pt")
+        input_ids = inputs["input_ids"]
+        output_dict = audioModel(input_ids, return_dict=True)
+        spectrogram = output_dict["spectrogram"]
+        waveform = hifigan(spectrogram)
+
+        if waveform is not None:
+            if np.abs(waveform.squeeze().detach().numpy()).max() > 1:
+                waveform /= np.abs(waveform.squeeze().detach().numpy()).max()
+
+            sd.play(waveform.squeeze().detach().numpy(), samplerate=22050)
+            status = sd.wait()
+            if status:
+                print(f"Error during playback: {status}")
+
+        end = time.time()
+        speechLoadingTime = str(math.floor(end - start))
+        print("Speech took " + speechLoadingTime + " seconds to play")
+    except Exception as e:
+        print(e)
+        continue
