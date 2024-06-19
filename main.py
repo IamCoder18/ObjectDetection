@@ -3,7 +3,8 @@ import math
 import cv2
 from collections import Counter
 from inflect import engine
-from transformers import DetrImageProcessor, DetrForObjectDetection, FastSpeech2ConformerTokenizer, FastSpeech2ConformerModel, FastSpeech2ConformerHifiGan
+from transformers import DetrImageProcessor, DetrForObjectDetection, FastSpeech2ConformerTokenizer, \
+    FastSpeech2ConformerModel, FastSpeech2ConformerHifiGan
 import sounddevice as sd
 from PIL import Image
 import torch
@@ -17,14 +18,16 @@ audioModel = FastSpeech2ConformerModel.from_pretrained("espnet/fastspeech2_confo
 hifigan = FastSpeech2ConformerHifiGan.from_pretrained("espnet/fastspeech2_conformer_hifigan")
 processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
 objModel = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-101", revision="no_timm")
+cap = cv2.VideoCapture(0)
 
 end = time.time()
 modelLoadingTime = str(math.floor(end - start))
 
 print("Models took " + modelLoadingTime + " seconds to load")
 
+
 def capture():
-    cap = cv2.VideoCapture(0)
+
 
     if not cap.isOpened():
         print("Error opening camera")
@@ -42,8 +45,6 @@ def capture():
 
         if captured_frame is None:
             captured_frame = frame
-
-    cap.release()
 
     if captured_frame is not None:
         cv2.imwrite('image.jpg', captured_frame)
@@ -136,24 +137,25 @@ while True:
 
         start = time.time()
 
-        inputs = tokenizer(finalText, return_tensors="pt")
-        input_ids = inputs["input_ids"]
-        output_dict = audioModel(input_ids, return_dict=True)
-        spectrogram = output_dict["spectrogram"]
-        waveform = hifigan(spectrogram)
+        if finalText != "":
+            inputs = tokenizer(finalText, return_tensors="pt")
+            input_ids = inputs["input_ids"]
+            output_dict = audioModel(input_ids, return_dict=True)
+            spectrogram = output_dict["spectrogram"]
+            waveform = hifigan(spectrogram)
 
-        if waveform is not None:
-            if np.abs(waveform.squeeze().detach().numpy()).max() > 1:
-                waveform /= np.abs(waveform.squeeze().detach().numpy()).max()
+            if waveform is not None:
+                if np.abs(waveform.squeeze().detach().numpy()).max() > 1:
+                    waveform /= np.abs(waveform.squeeze().detach().numpy()).max()
 
-            sd.play(waveform.squeeze().detach().numpy(), samplerate=22050)
-            status = sd.wait()
-            if status:
-                print(f"Error during playback: {status}")
+                sd.play(waveform.squeeze().detach().numpy(), samplerate=22050)
+                status = sd.wait()
+                if status:
+                    print(f"Error during playback: {status}")
 
-        end = time.time()
-        speechLoadingTime = str(math.floor(end - start))
-        print("Speech took " + speechLoadingTime + " seconds to play")
+            end = time.time()
+            speechLoadingTime = str(math.floor(end - start))
+            print("Speech took " + speechLoadingTime + " seconds to play")
     except Exception as e:
         print(e)
         continue
