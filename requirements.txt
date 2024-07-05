@@ -1,6 +1,0 @@
-opencv-python
-transformers
-sounddevice
-numpy
-torch
-inflect
