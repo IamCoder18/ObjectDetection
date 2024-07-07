@@ -17,7 +17,7 @@ model.overrides['agnostic_nms'] = False
 model.overrides['max_det'] = 1000
 
 
-@app.route('/', methods=['POST'])
+@app.route("/", methods=['POST'])
 def upload_image():
     start_time = time.time()
 
@@ -71,6 +71,11 @@ def upload_image():
     execution_time = end_time - start_time
     print(f"Detection time: {execution_time:.2f} seconds")
     return {"result": object_predictions}, 200
+
+
+@app.route("/activate", methods=['GET'])
+def activate():
+    return "Ok", 200
 
 
 if __name__ == '__main__':
