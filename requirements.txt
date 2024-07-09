@@ -1,8 +1,8 @@
 scikit-image
 imagecodecs
 opencv-python==4.7.0.72
-numpy<2.0.0
-ultralyticsplus~=0.1.0
+numpy==1.26.4
+ultralyticsplus==0.1.0
 setuptools~=70.1.0
 requests~=2.32.3
 pip~=24.1.1
@@ -11,3 +11,4 @@ gunicorn
 sahi~=0.11.16
 Werkzeug~=3.0.3
 flask_cors~=4.0.1
+pillow~=10.3.0
